@@ -10,6 +10,7 @@ from dspy.predict.program_of_thought import ProgramOfThought
 from dspy.predict.react import ReAct, Tool
 from dspy.predict.react_v2 import ReActV2
 from dspy.predict.refine import Refine
+from dspy.predict.repl_compaction import REPLHistoryCompactor, TrajectorySummary
 from dspy.predict.rlm import RLM
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "ReAct",
     "ReActV2",
     "Refine",
+    "REPLHistoryCompactor",
+    "TrajectorySummary",
     "RLM",
     "Tool",
     "Parallel",

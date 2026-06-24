@@ -129,17 +129,29 @@ class REPLHistory(pydantic.BaseModel):
     """Container for REPL interaction history.
 
     Immutable: append() returns a new instance with the entry added.
+
+    ``summary`` holds a compacted, self-written recap of earlier steps that
+    have been dropped from ``entries`` (see REPLHistoryCompactor). When set, it
+    is rendered ahead of the surviving entries so the model retains the gist of
+    its prior reasoning without re-reading the full trajectory.
     """
 
     entries: list[REPLEntry] = Field(default_factory=list)
     max_output_chars: int = 10_000
+    summary: str = ""
 
     model_config = pydantic.ConfigDict(frozen=True)
 
     def format(self) -> str:
-        if not self.entries:
+        if not self.entries and not self.summary:
             return "You have not interacted with the REPL environment yet."
-        return "\n".join(entry.format(index=i, max_output_chars=self.max_output_chars) for i, entry in enumerate(self.entries))
+        sections = []
+        if self.summary:
+            sections.append(f"=== Summary of earlier steps ===\n{self.summary}")
+        sections.extend(
+            entry.format(index=i, max_output_chars=self.max_output_chars) for i, entry in enumerate(self.entries)
+        )
+        return "\n".join(sections)
 
     @pydantic.model_serializer()
     def serialize_model(self) -> str:
@@ -148,7 +160,11 @@ class REPLHistory(pydantic.BaseModel):
     def append(self, *, reasoning: str = "", code: str, output: str) -> REPLHistory:
         """Return a new REPLHistory with the entry appended."""
         new_entry = REPLEntry(reasoning=reasoning, code=code, output=output)
-        return REPLHistory(entries=list(self.entries) + [new_entry], max_output_chars=self.max_output_chars)
+        return REPLHistory(
+            entries=list(self.entries) + [new_entry],
+            max_output_chars=self.max_output_chars,
+            summary=self.summary,
+        )
 
     def __len__(self) -> int:
         return len(self.entries)

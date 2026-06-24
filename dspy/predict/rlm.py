@@ -33,6 +33,7 @@ from dspy.utils.annotation import experimental
 
 if TYPE_CHECKING:
 
+    from dspy.predict.repl_compaction import REPLHistoryCompactor
     from dspy.signatures.signature import Signature
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,7 @@ class RLM(Module):
         tools: list[Callable] | None = None,
         sub_lm: dspy.LM | None = None,
         interpreter: CodeInterpreter | None = None,
+        compactor: REPLHistoryCompactor | None = None,
     ):
         """
         Args:
@@ -148,6 +150,9 @@ class RLM(Module):
             sub_lm: LM for llm_query/llm_query_batched. Defaults to dspy.settings.lm.
                    Allows using a different (e.g., cheaper) model for sub-queries.
             interpreter: CodeInterpreter implementation to use. Defaults to PythonInterpreter.
+            compactor: Optional REPLHistoryCompactor that self-summarizes the REPL
+                      trajectory once it grows large, keeping long recursive runs
+                      within the context budget. Defaults to no compaction.
         """
         super().__init__()
         self.signature = ensure_signature(signature)
@@ -157,6 +162,7 @@ class RLM(Module):
         self.verbose = verbose
         self.sub_lm = sub_lm
         self._interpreter = interpreter
+        self.compactor = compactor
         self._user_tools = self._normalize_tools(tools)
         self._validate_tools(self._user_tools)
 
@@ -617,6 +623,12 @@ class RLM(Module):
         result = self._execute_code(repl, code, input_args)
         return self._process_execution_result(action, code, result, history, output_field_names)
 
+    def _maybe_compact(self, history: REPLHistory) -> REPLHistory:
+        """Self-summarize the trajectory when it outgrows the context budget."""
+        if self.compactor is not None and self.compactor.should_compact(history):
+            return self.compactor.compact(history)
+        return history
+
     # =========================================================================
     # Public Interface
     # =========================================================================
@@ -649,7 +661,7 @@ class RLM(Module):
                 )
                 if isinstance(result, Prediction):
                     return result
-                history = result
+                history = self._maybe_compact(result)
 
             # Max iterations reached - use extract fallback
             return self._extract_fallback(variables, history, output_field_names)
@@ -734,7 +746,7 @@ class RLM(Module):
                 )
                 if isinstance(result, Prediction):
                     return result
-                history = result
+                history = self._maybe_compact(result)
 
             # Max iterations reached - use extract fallback
             return await self._aextract_fallback(variables, history, output_field_names)

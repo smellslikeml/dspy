@@ -70,7 +70,7 @@ jobs:
           if [ -n "$MODEL_INPUT" ]; then
             echo "ANTHROPIC_MODEL=$MODEL_INPUT" >> "$GITHUB_ENV"
           fi
-      - uses: remyxai/outrider@feat/spillover-threshold
+      - uses: remyxai/outrider@v1
         with:
           interest-id: 422933f6-18c6-43a2-ab61-d73d08273297
           # Minimum days between recommendation PRs on this repo. '0' lets

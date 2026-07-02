@@ -6,6 +6,7 @@ import orjson
 
 import dspy
 from dspy.adapters.utils import get_field_description_string
+from dspy.predict.error_localization import localize_error
 from dspy.predict.predict import Prediction
 from dspy.signatures import InputField, OutputField, Signature
 
@@ -15,10 +16,12 @@ from .predict import Module
 class OfferFeedback(Signature):
     """
     In the discussion, assign blame to each module that contributed to the final reward being below the threshold, if
-    any. Then, prescribe concrete advice of how the module should act on its future input when we retry the process, if
-    it were to receive the same or similar inputs. If a module is not to blame, the advice should be N/A.
-    The module will not see its own history, so it needs to rely on entirely concrete and actionable advice from you
-    to avoid the same mistake on the same or similar inputs.
+    any. An objective analysis of the execution trace is provided in `error_location` to point you at the module(s)
+    most likely at fault; anchor your blame assignment on it and focus your correction there rather than re-diagnosing
+    every module from scratch. Then, prescribe concrete advice of how the module should act on its future input when we
+    retry the process, if it were to receive the same or similar inputs. If a module is not to blame, the advice should
+    be N/A. The module will not see its own history, so it needs to rely on entirely concrete and actionable advice
+    from you to avoid the same mistake on the same or similar inputs.
     """
 
     program_code: str = InputField(desc="The code of the program that we are analyzing")
@@ -30,6 +33,10 @@ class OfferFeedback(Signature):
     target_threshold: float = InputField(desc="The target threshold for the reward function")
     reward_value: float = InputField(desc="The reward value assigned to the program's outputs")
     module_names: list[str] = InputField(desc="The names of the modules in the program, for which we seek advice")
+    error_location: str = InputField(
+        desc="An objective, trace-derived hint about which module(s) most likely caused the failure, to focus "
+        "correction on. Derived from the execution trace and reward, not from model self-diagnosis."
+    )
     discussion: str = OutputField(desc="Discussing blame of where each module went wrong, if it did")
     advice: dict[str, str] = OutputField(
         desc="For each module, describe very concretely, in this order: the specific scenarios in which it has made "
@@ -147,6 +154,10 @@ class Refine(Module):
 
                 modules = {"program_code": self.module_code, "modules_defn": inspect_modules(mod)}
                 trajectory = [{"module_name": predictor2name[p], "inputs": i, "outputs": dict(o)} for p, i, o in trace]
+                # Find the error location from objective trace/reward signals before asking the LM to correct it.
+                error_location = localize_error(
+                    trajectory, module_names=module_names, reward_value=reward, threshold=self.threshold
+                ).format()
                 trajectory = {
                     "program_inputs": kwargs,
                     "program_trajectory": trajectory,
@@ -158,7 +169,9 @@ class Refine(Module):
                     "reward_value": reward,
                 }
 
-                advise_kwargs = dict(**modules, **trajectory, **reward, module_names=module_names)
+                advise_kwargs = dict(
+                    **modules, **trajectory, **reward, module_names=module_names, error_location=error_location
+                )
                 # only dumps if it's a list or dict
                 advise_kwargs = {
                     k: v if isinstance(v, str) else orjson.dumps(recursive_mask(v), option=orjson.OPT_INDENT_2).decode()
